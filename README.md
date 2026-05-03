@@ -52,13 +52,22 @@ docker compose version
 
 ### Start the stack
 
-From the project root (`Module 8/`):
+There are two ways to start the same stack — pick one:
+
+**Option A — Build images locally from source** (developers working on the code):
 
 ```powershell
 docker compose up -d --build
 ```
 
-Services and ports:
+**Option B — Pull pre-built images from Docker Hub** (integration team / anyone
+who just wants to run the app without building):
+
+```powershell
+docker compose -f docker-compose.hub.yml up -d
+```
+
+Services and ports (same for both options):
 
 | Service | URL / Port | Description |
 | --- | --- | --- |
@@ -68,6 +77,11 @@ Services and ports:
 
 On first start, the database is auto-initialized from
 `server/src/db/schema.sql` and `server/src/db/seed.sql`.
+
+Published Docker Hub images (used by Option B):
+
+- <https://hub.docker.com/r/shafiqullah033/module8-web>
+- <https://hub.docker.com/r/shafiqullah033/module8-server>
 
 ### Common commands
 
