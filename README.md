@@ -38,6 +38,24 @@ Open the URL Vite prints (default `http://localhost:5173`).
 The whole stack (Postgres + Express API + React/nginx frontend) can be started
 with a single command using Docker Compose.
 
+### TL;DR for the Integration Team
+
+Install Docker Desktop, then:
+
+```powershell
+git clone https://github.com/ShafiqUllah2233/Module-08.git
+cd Module-08
+docker compose -f docker-compose.hub.yml up -d
+```
+
+Open <http://localhost:8080>. That's it — no `npm install`, no local build.
+
+| Resource | Link |
+| --- | --- |
+| GitHub repo (source) | <https://github.com/ShafiqUllah2233/Module-08> |
+| Docker Hub — frontend image | <https://hub.docker.com/r/shafiqullah033/module8-web> |
+| Docker Hub — backend image | <https://hub.docker.com/r/shafiqullah033/module8-server> |
+
 ### Prerequisites
 
 Install **Docker Desktop** for Windows:
