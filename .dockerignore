@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-ssr
+.vite
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+Dockerfile
+.dockerignore
+README.md
+
+# Do NOT send the server folder into the frontend build context
+server

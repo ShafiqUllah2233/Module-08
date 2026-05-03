@@ -33,6 +33,79 @@ npm run dev
 
 Open the URL Vite prints (default `http://localhost:5173`).
 
+## Run with Docker
+
+The whole stack (Postgres + Express API + React/nginx frontend) can be started
+with a single command using Docker Compose.
+
+### Prerequisites
+
+Install **Docker Desktop** for Windows:
+<https://www.docker.com/products/docker-desktop/>
+
+After install, verify from PowerShell:
+
+```powershell
+docker --version
+docker compose version
+```
+
+### Start the stack
+
+From the project root (`Module 8/`):
+
+```powershell
+docker compose up -d --build
+```
+
+Services and ports:
+
+| Service | URL / Port | Description |
+| --- | --- | --- |
+| `web`    | <http://localhost:8080>        | React app served by nginx, proxies `/api` to the backend |
+| `server` | <http://localhost:4000/api/health> | Express API |
+| `db`     | `localhost:5432`               | Postgres 16 (user `postgres`, password `postgres`, db `g08_dispute`) |
+
+On first start, the database is auto-initialized from
+`server/src/db/schema.sql` and `server/src/db/seed.sql`.
+
+### Common commands
+
+```powershell
+docker compose logs -f            # tail logs from all services
+docker compose logs -f server     # tail only the backend
+docker compose ps                 # list running containers
+docker compose down               # stop and remove containers (keeps data)
+docker compose down -v            # also wipe the database volume
+docker compose up -d --build web  # rebuild only the frontend image
+```
+
+### Push images to Docker Hub
+
+1. Create a Docker Hub account at <https://hub.docker.com/> and run
+   `docker login` from PowerShell.
+2. Tag and push. Replace `YOUR_DOCKERHUB_USERNAME` with your username:
+
+   ```powershell
+   # Build locally first (compose already built them, but retag for the registry)
+   docker tag module-8-web    YOUR_DOCKERHUB_USERNAME/module8-web:latest
+   docker tag module-8-server YOUR_DOCKERHUB_USERNAME/module8-server:latest
+
+   docker push YOUR_DOCKERHUB_USERNAME/module8-web:latest
+   docker push YOUR_DOCKERHUB_USERNAME/module8-server:latest
+   ```
+
+   > The image names (`module-8-web`, `module-8-server`) come from the compose
+   > project name + service name. Run `docker images` to confirm the exact
+   > names on your machine before tagging.
+
+3. Anyone can then run your images without the source code:
+
+   ```powershell
+   docker pull YOUR_DOCKERHUB_USERNAME/module8-web:latest
+   docker pull YOUR_DOCKERHUB_USERNAME/module8-server:latest
+   ```
+
 ## Mapping to SRS requirements
 
 - **FR-DR-01..07** Dispute Submission → `NewDispute.jsx`
