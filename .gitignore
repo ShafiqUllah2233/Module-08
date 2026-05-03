@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+.env
+.env.*
+!.env.example
+server/uploads
+.DS_Store
+Thumbs.db
