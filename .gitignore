@@ -10,3 +10,6 @@ server/uploads
 .DS_Store
 Thumbs.db
 Module_8_SRS.pdf
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
