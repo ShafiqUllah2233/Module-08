@@ -1,5 +1,8 @@
 # ---- Backend: Node + Express API ----
 FROM node:20-alpine
+LABEL maintainer="integration-team"
+LABEL version="1.0"
+LABEL description="G08 Dispute Resolution - Backend API"
 
 WORKDIR /app
 
@@ -7,14 +10,20 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Copy source
+# Copy application source
 COPY . .
 
-# Create upload directory (also a volume mount target in compose)
-RUN mkdir -p /app/uploads
+# Create upload directory for file storage
+RUN mkdir -p /app/uploads && chmod 755 /app/uploads
 
+# Set environment
 ENV NODE_ENV=production
 ENV PORT=4000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:4000/api/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+
 EXPOSE 4000
 
 CMD ["node", "src/server.js"]
