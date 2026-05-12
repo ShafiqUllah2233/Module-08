@@ -1,9 +1,12 @@
 // /api/admin/audit-log — immutable record (FR-DR-36..38)
 const express = require("express");
 const { query } = require("../config/db");
+const { requireAdmin } = require("../middleware/auth");
 const { serializeAudit } = require("../utils/serializers");
 
 const router = express.Router();
+
+router.use(requireAdmin);
 
 router.get("/", async (req, res, next) => {
   try {
@@ -42,8 +45,8 @@ router.get("/", async (req, res, next) => {
     }
 
     const sql = `
-      SELECT l.*, u.name AS admin_name
-        FROM admin_audit_log l
+      SELECT l.*, u.display_name AS admin_name
+        FROM dispute_admin_audit_log l
         LEFT JOIN admin_profiles ap ON ap.id = l.admin_id
         LEFT JOIN users u           ON u.id  = ap.user_id
        ${where.length ? "WHERE " + where.join(" AND ") : ""}
@@ -60,8 +63,8 @@ router.get("/", async (req, res, next) => {
 router.get("/export", async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT l.*, u.name AS admin_name
-         FROM admin_audit_log l
+      `SELECT l.*, u.display_name AS admin_name
+         FROM dispute_admin_audit_log l
          LEFT JOIN admin_profiles ap ON ap.id = l.admin_id
          LEFT JOIN users u           ON u.id  = ap.user_id
         ORDER BY l.performed_at DESC`

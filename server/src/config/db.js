@@ -1,5 +1,5 @@
 // Single shared PG pool. Loaded once and reused by every controller.
-require("dotenv").config();
+require("dotenv").config({ override: true });
 const { Pool } = require("pg");
 
 const pool = new Pool({

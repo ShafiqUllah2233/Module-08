@@ -1,79 +1,99 @@
-import { useState } from "react";
-import { Plus } from "lucide-react";
-import Toggle from "../components/Toggle";
-import { ADMIN_ROLES, adminProfiles as seed } from "../data/mockData";
+import { useCallback, useEffect, useState } from "react";
+import { Link, Navigate } from "react-router-dom";
+import { Shield } from "lucide-react";
+import { apiFetch } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+import { formatDate } from "../utils/format";
 
-function RoleBadge({ role }) {
-  const styles = {
-    [ADMIN_ROLES.SUPER_ADMIN]: "bg-navy-900 text-white",
-    [ADMIN_ROLES.ARBITER]: "bg-mint-300 text-navy-900",
-    [ADMIN_ROLES.MODERATOR]: "bg-mint-300 text-navy-900",
-  };
+function RoleBadge({ role, label }) {
+  const isSuper = role === "super_admin";
   return (
     <span
       className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold ${
-        styles[role] || "bg-slate-100 text-ink-700"
+        isSuper ? "bg-primary text-on-primary" : "bg-mint-300 text-navy-900"
       }`}
     >
-      {role}
+      {label || role}
     </span>
   );
 }
 
 export default function AdminProfiles() {
-  const [admins, setAdmins] = useState(seed);
+  const { user } = useAuth();
+  const [admins, setAdmins] = useState([]);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
 
-  function toggleActive(id) {
-    setAdmins((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, active: !a.active } : a))
-    );
+  const load = useCallback(async () => {
+    try {
+      const rows = await apiFetch("/api/admins");
+      setAdmins(rows || []);
+      setError("");
+    } catch (e) {
+      setError(e.message || "Could not load admins.");
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (!user?.is_admin) {
+    return <Navigate to="/disputes" replace />;
   }
 
-  function deactivate(id) {
-    if (!confirm("Deactivate this admin account?")) return;
-    setAdmins((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, active: false } : a))
-    );
-  }
-
-  function addAdmin() {
-    const name = prompt("Admin name?");
-    if (!name) return;
-    const email = prompt("Email?") || "new.admin@nexus.com";
-    setAdmins((prev) => [
-      ...prev,
-      {
-        id: `ADM-${(prev.length + 1).toString().padStart(3, "0")}`,
-        name,
-        email,
-        role: ADMIN_ROLES.MODERATOR,
-        active: true,
-        created: new Date().toISOString().slice(0, 10),
-      },
-    ]);
+  async function setRowActive(row, active) {
+    if (!active && !confirm("Deactivate this admin account?")) return;
+    setBusyId(row.id);
+    try {
+      if (!active) {
+        await apiFetch(`/api/admins/${row.id}/deactivate`, { method: "POST" });
+      } else {
+        await apiFetch(`/api/admins/${row.id}`, {
+          method: "PATCH",
+          body: { is_active: true, role: row.role },
+        });
+      }
+      await load();
+    } catch (e) {
+      alert(e.message || "Failed");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-[22px] font-extrabold text-ink-900">
-            Admin Profiles
+          <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+            Administration
+          </p>
+          <h1 className="text-[22px] font-extrabold text-primary font-headline">
+            Admin profiles
           </h1>
-          <p className="text-[13px] text-ink-500 mt-1">
-            Manage dispute resolution personnel and permissions.
+          <p className="text-[13px] text-slate-500 mt-1">
+            Dispute moderation and super-admin access.
           </p>
         </div>
-        <button
-          onClick={addAdmin}
-          className="inline-flex items-center gap-2 bg-navy-900 hover:bg-navy-800 text-white text-[13px] font-semibold px-4 py-2.5 rounded-lg shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          New Admin
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to="/admin/register"
+            className="inline-flex items-center gap-2 bg-primary text-on-primary text-[13px] font-semibold px-4 py-2.5 rounded-lg shadow-sm hover:opacity-95"
+          >
+            <Shield className="w-4 h-4" />
+            Add admin
+          </Link>
+        </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-card overflow-hidden">
+      {error && (
+        <div className="mb-4 rounded-lg bg-red-50 border border-red-100 text-red-700 text-sm px-4 py-3">
+          {error}
+        </div>
+      )}
+
+      <div className="bg-surface-container-lowest rounded-xl shadow-card border border-outline-variant/15 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
@@ -90,33 +110,26 @@ export default function AdminProfiles() {
               {admins.map((a) => (
                 <tr
                   key={a.id}
-                  className="border-b border-slate-50 last:border-0 hover:bg-lavender-50/50"
+                  className="border-b border-slate-50 last:border-0 hover:bg-surface-container-low/70"
                 >
                   <Td className="font-semibold text-ink-900">{a.name}</Td>
                   <Td>{a.email}</Td>
                   <Td>
-                    <RoleBadge role={a.role} />
+                    <RoleBadge role={a.role} label={a.role_label} />
                   </Td>
-                  <Td>
-                    <Toggle
-                      checked={a.active}
-                      onChange={() => toggleActive(a.id)}
-                      ariaLabel={`Toggle active status for ${a.name}`}
-                    />
-                  </Td>
-                  <Td>{a.created}</Td>
+                  <Td>{a.is_active ? "Yes" : "No"}</Td>
+                  <Td>{formatDate(a.created_at)}</Td>
                   <Td className="text-right pr-6">
-                    <div className="inline-flex items-center gap-4">
-                      <button className="text-[12px] font-semibold text-ink-700 hover:text-navy-900">
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => deactivate(a.id)}
-                        className="text-[12px] font-semibold text-rose-500 hover:text-rose-600"
-                      >
-                        Deactivate
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      disabled={busyId === a.id}
+                      onClick={() =>
+                        setRowActive(a, !a.is_active)
+                      }
+                      className="text-[12px] font-semibold text-primary hover:underline disabled:opacity-50"
+                    >
+                      {a.is_active ? "Deactivate" : "Activate"}
+                    </button>
                   </Td>
                 </tr>
               ))}
@@ -130,9 +143,7 @@ export default function AdminProfiles() {
 
 function Th({ children, className = "" }) {
   return (
-    <th
-      className={`px-6 py-3 text-[12px] font-semibold uppercase tracking-wide ${className}`}
-    >
+    <th className={`px-6 py-3 text-[12px] font-semibold uppercase tracking-wide ${className}`}>
       {children}
     </th>
   );

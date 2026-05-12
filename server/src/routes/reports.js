@@ -6,7 +6,7 @@
 const express = require("express");
 const { query } = require("../config/db");
 const { httpError } = require("../middleware/error");
-const { requireAdmin } = require("../middleware/ctxUser");
+const { requireAdmin } = require("../middleware/auth");
 const { logAudit } = require("../utils/audit");
 const { OUTCOME_LABELS } = require("../utils/labels");
 const { serializeReport } = require("../utils/serializers");
@@ -17,7 +17,7 @@ const reportRouter = express.Router();
 disputeReportRouter.get("/", async (req, res, next) => {
   try {
     const did = parseInt(req.params.id, 10);
-    const { rows } = await query("SELECT * FROM resolution_reports WHERE dispute_id = $1", [did]);
+    const { rows } = await query("SELECT * FROM dispute_resolution_reports WHERE dispute_id = $1", [did]);
     res.json(serializeReport(rows[0]) || null);
   } catch (err) {
     next(err);
@@ -29,7 +29,7 @@ disputeReportRouter.post("/", requireAdmin, async (req, res, next) => {
     const did = parseInt(req.params.id, 10);
 
     const dec = await query(
-      `SELECT * FROM arbitration_decisions WHERE dispute_id = $1`,
+      `SELECT * FROM dispute_arbitration_decisions WHERE dispute_id = $1`,
       [did]
     );
     if (!dec.rows[0]) {
@@ -38,11 +38,11 @@ disputeReportRouter.post("/", requireAdmin, async (req, res, next) => {
     const decision = dec.rows[0];
 
     const evCount = await query(
-      "SELECT COUNT(*)::int AS n FROM evidence WHERE dispute_id = $1",
+      "SELECT COUNT(*)::int AS n FROM dispute_evidence WHERE dispute_id = $1",
       [did]
     );
     const medCount = await query(
-      "SELECT COUNT(*)::int AS n FROM mediation_records WHERE dispute_id = $1",
+      "SELECT COUNT(*)::int AS n FROM dispute_mediation_records WHERE dispute_id = $1",
       [did]
     );
 
@@ -63,7 +63,7 @@ disputeReportRouter.post("/", requireAdmin, async (req, res, next) => {
     };
 
     const upsert = await query(
-      `INSERT INTO resolution_reports
+      `INSERT INTO dispute_resolution_reports
          (dispute_id, decision_id, dispute_summary, evidence_summary,
           mediation_summary, admin_decision, decision_notes, delivered_to_parties)
        VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)
@@ -106,7 +106,7 @@ reportRouter.patch("/:id/deliver", requireAdmin, async (req, res, next) => {
     const id = parseInt(req.params.id, 10);
     const delivered = !!req.body.delivered_to_parties;
     const upd = await query(
-      `UPDATE resolution_reports SET delivered_to_parties = $1
+      `UPDATE dispute_resolution_reports SET delivered_to_parties = $1
         WHERE id = $2 RETURNING *`,
       [delivered, id]
     );

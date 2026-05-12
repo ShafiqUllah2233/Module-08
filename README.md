@@ -1,153 +1,105 @@
-# G08 — Dispute Resolution (Frontend)
+# G08 — Dispute Resolution (Full Stack)
 
 Module 8 of the National Freelance & Skill Verification Platform — Dispute & Conflict Resolution.
-This is the React frontend implementation of the Figma design.
 
-## Stack
+This repository contains:
+- React + Vite frontend (`src/`)
+- Express + PostgreSQL backend (`server/`)
+- Centralized SQL reference (`Default/SPM_Centralized_Db.sql`)
 
-- **React 18** + **Vite** (fast dev server / HMR)
-- **React Router v6** (page navigation)
-- **Tailwind CSS** (theme tokens for the Figma palette)
-- **lucide-react** (icons)
+## Current architecture
 
-## Pages implemented
+- Frontend authenticates via `POST /api/auth/login`.
+- Frontend sends `Authorization: Bearer <token>` for protected API calls.
+- Vite dev server proxies `/api` and `/uploads` to `http://localhost:4000`.
+- Backend enforces role checks using `req.ctxUser` and `req.ctxAdmin`.
 
-| Route | File | Figma |
-| --- | --- | --- |
-| `/disputes` | `src/pages/DisputesList.jsx` | Image 1 — Your Disputes |
-| `/disputes/new` | `src/pages/NewDispute.jsx` | Image 2 — File a New Dispute |
-| `/disputes/:id` | `src/pages/DisputeDetail.jsx` | Image 3 — Dispute Detail |
-| `/disputes/:id/mediation` | `src/pages/MediationRoom.jsx` | Image 4 — Mediation Room |
-| `/disputes/:id/history` | `src/pages/StatusHistory.jsx` | Image 5 — Status History |
+## Tech stack
 
-All pages share a single mock data source in `src/data/mockData.js` so navigating
-between pages keeps you on the same dispute (e.g. clicking *View* on `DSP-2023-001`
-takes you to its detail, and from there to its mediation room and status history).
+- Frontend: React 18, Vite, React Router, Tailwind, lucide-react
+- Backend: Node.js, Express, PostgreSQL (`pg`), Multer, JWT, bcrypt
 
-## Run locally
+## Quick start (local)
+
+### 1) Backend
 
 ```bash
+cd server
+cp .env.example .env
+npm install
+npm run db:reset
+npm run dev
+```
+
+> On Windows PowerShell, use:
+> `Copy-Item .env.example .env`
+
+Backend runs at:
+- `http://localhost:4000`
+- health: `http://localhost:4000/api/health`
+
+### 2) Frontend
+
+```bash
+# from repo root
 npm install
 npm run dev
 ```
 
-Open the URL Vite prints (default `http://localhost:5173`).
+Frontend runs at:
+- `http://localhost:5173`
 
-## Run with Docker
+## Auth & demo logins
 
-The whole stack (Postgres + Express API + React/nginx frontend) can be started
-with a single command using Docker Compose.
+After local reset/seed, use:
+- Admin: `sarah@nexus.com` / `password`
+- User: `alice@example.com` / `password`
 
-### TL;DR for the Integration Team
+## Role behavior in UI
 
-Install Docker Desktop, then:
+- **User** can file disputes and escalate from mediation.
+- **Admin** can review/assign disputes, update status, review evidence, arbitrate, generate reports.
+- Admin pages:
+  - `/admin/queue`
+  - `/admin/profiles`
+  - `/admin/register`
+  - `/admin/audit-log`
 
-```powershell
-git clone https://github.com/ShafiqUllah2233/Module-08.git
-cd Module-08
-docker compose -f docker-compose.hub.yml up -d
-```
+## Key routes (frontend)
 
-Open <http://localhost:8080>. That's it — no `npm install`, no local build.
+- `/login`
+- `/disputes`
+- `/disputes/new` (user-only)
+- `/disputes/:id`
+- `/disputes/:id/mediation`
+- `/disputes/:id/history`
+- `/admin/queue`
+- `/admin/profiles`
+- `/admin/register`
+- `/admin/audit-log`
+- `/admin/disputes/:id/review`
+- `/admin/disputes/:id/arbitration`
+- `/admin/disputes/:id/resolution`
+- `/profile`
+- `/settings`
 
-| Resource | Link |
-| --- | --- |
-| GitHub repo (source) | <https://github.com/ShafiqUllah2233/Module-08> |
-| Docker Hub — frontend image | <https://hub.docker.com/r/shafiqullah033/module8-web> |
-| Docker Hub — backend image | <https://hub.docker.com/r/shafiqullah033/module8-server> |
+## Docker
 
-### Prerequisites
-
-Install **Docker Desktop** for Windows:
-<https://www.docker.com/products/docker-desktop/>
-
-After install, verify from PowerShell:
-
-```powershell
-docker --version
-docker compose version
-```
-
-### Start the stack
-
-There are two ways to start the same stack — pick one:
-
-**Option A — Build images locally from source** (developers working on the code):
+You can still run via compose:
 
 ```powershell
 docker compose up -d --build
-```
-
-**Option B — Pull pre-built images from Docker Hub** (integration team / anyone
-who just wants to run the app without building):
-
-```powershell
+# or
 docker compose -f docker-compose.hub.yml up -d
 ```
 
-Services and ports (same for both options):
+Default service endpoints:
+- Web: `http://localhost:8080`
+- API: `http://localhost:4000`
+- DB: `localhost:5432`
 
-| Service | URL / Port | Description |
-| --- | --- | --- |
-| `web`    | <http://localhost:8080>        | React app served by nginx, proxies `/api` to the backend |
-| `server` | <http://localhost:4000/api/health> | Express API |
-| `db`     | `localhost:5432`               | Postgres 16 (user `postgres`, password `postgres`, db `g08_dispute`) |
+## Notes for GitHub upload
 
-On first start, the database is auto-initialized from
-`server/src/db/schema.sql` and `server/src/db/seed.sql`.
-
-Published Docker Hub images (used by Option B):
-
-- <https://hub.docker.com/r/shafiqullah033/module8-web>
-- <https://hub.docker.com/r/shafiqullah033/module8-server>
-
-### Common commands
-
-```powershell
-docker compose logs -f            # tail logs from all services
-docker compose logs -f server     # tail only the backend
-docker compose ps                 # list running containers
-docker compose down               # stop and remove containers (keeps data)
-docker compose down -v            # also wipe the database volume
-docker compose up -d --build web  # rebuild only the frontend image
-```
-
-### Push images to Docker Hub
-
-1. Create a Docker Hub account at <https://hub.docker.com/> and run
-   `docker login` from PowerShell.
-2. Tag and push. Replace `YOUR_DOCKERHUB_USERNAME` with your username:
-
-   ```powershell
-   # Build locally first (compose already built them, but retag for the registry)
-   docker tag module-8-web    YOUR_DOCKERHUB_USERNAME/module8-web:latest
-   docker tag module-8-server YOUR_DOCKERHUB_USERNAME/module8-server:latest
-
-   docker push YOUR_DOCKERHUB_USERNAME/module8-web:latest
-   docker push YOUR_DOCKERHUB_USERNAME/module8-server:latest
-   ```
-
-   > The image names (`module-8-web`, `module-8-server`) come from the compose
-   > project name + service name. Run `docker images` to confirm the exact
-   > names on your machine before tagging.
-
-3. Anyone can then run your images without the source code:
-
-   ```powershell
-   docker pull YOUR_DOCKERHUB_USERNAME/module8-web:latest
-   docker pull YOUR_DOCKERHUB_USERNAME/module8-server:latest
-   ```
-
-## Mapping to SRS requirements
-
-- **FR-DR-01..07** Dispute Submission → `NewDispute.jsx`
-- **FR-DR-08..12** Evidence Upload → evidence section of `NewDispute.jsx` and `DisputeDetail.jsx`
-- **FR-DR-13..16** Status Tracking → `StatusHistory.jsx` + timeline preview
-- **FR-DR-17..21** Mediation → `MediationRoom.jsx`
-- **FR-DR-22..27** Arbitration → escalate button (UI hook present, admin panel comes next)
-- **FR-DR-28..31** Resolution Reporting → resolution view from history (next iteration)
-
-Cross-module integration points are visually annotated with the
-red dashed `IntegrationTag` component (e.g. *Links to G06 — Messaging*) to mirror
-the Figma. Real REST calls will replace the mock data when the Integration Group
-publishes endpoint specs (see TBD-03).
+- `server/.env` is intentionally ignored.
+- Commit `server/.env.example` (safe template) so others can run quickly.
+- Do not commit local secrets, uploads, or `node_modules`.

@@ -1,4 +1,4 @@
-// Tiny helper around the admin_audit_log table.
+// Tiny helper around the dispute_admin_audit_log table.
 // Every admin-mutating endpoint should call this so the audit page stays accurate.
 const { query } = require("../config/db");
 
@@ -27,7 +27,7 @@ async function logAudit({ adminId, actionType, targetEntityId, targetEntityType,
   }
 
   await query(
-    `INSERT INTO admin_audit_log (admin_id, action_type, target_entity_id, target_entity_type, details)
+    `INSERT INTO dispute_admin_audit_log (admin_id, action_type, target_entity_id, target_entity_type, details)
      VALUES ($1, $2, $3, $4, $5)`,
     [adminId || null, actionType, targetEntityId, targetEntityType, details || null]
   );

@@ -2,7 +2,7 @@
 const express = require("express");
 const { pool, query } = require("../config/db");
 const { httpError } = require("../middleware/error");
-const { requireAdmin } = require("../middleware/ctxUser");
+const { requireAdmin } = require("../middleware/auth");
 const { logAudit } = require("../utils/audit");
 const { serializeDecision } = require("../utils/serializers");
 
@@ -15,8 +15,8 @@ router.get("/", async (req, res, next) => {
   try {
     const did = parseInt(req.params.id, 10);
     const { rows } = await query(
-      `SELECT ad.*, au.name AS admin_name
-         FROM arbitration_decisions ad
+      `SELECT ad.*, au.display_name AS admin_name
+         FROM dispute_arbitration_decisions ad
          JOIN admin_profiles ap ON ap.id = ad.admin_id
          JOIN users          au ON au.id = ap.user_id
         WHERE ad.dispute_id = $1`,
@@ -55,7 +55,7 @@ router.post("/", requireAdmin, async (req, res, next) => {
     }
 
     const ins = await client.query(
-      `INSERT INTO arbitration_decisions
+      `INSERT INTO dispute_arbitration_decisions
          (dispute_id, admin_id, outcome, decision_notes, payment_signal_sent)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
@@ -65,7 +65,7 @@ router.post("/", requireAdmin, async (req, res, next) => {
     // Move dispute to resolution_completed
     const oldStatus = d.rows[0].status;
     await client.query(
-      `UPDATE disputes SET status = 'resolution_completed', updated_at = NOW()
+      `UPDATE disputes SET status = 'resolution_completed', resolved_at = NOW(), updated_at = NOW()
         WHERE id = $1`,
       [did]
     );
@@ -86,8 +86,8 @@ router.post("/", requireAdmin, async (req, res, next) => {
     });
 
     const enriched = await query(
-      `SELECT ad.*, au.name AS admin_name
-         FROM arbitration_decisions ad
+      `SELECT ad.*, au.display_name AS admin_name
+         FROM dispute_arbitration_decisions ad
          JOIN admin_profiles ap ON ap.id = ad.admin_id
          JOIN users          au ON au.id = ap.user_id
         WHERE ad.id = $1`,

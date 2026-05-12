@@ -9,7 +9,7 @@ router.get("/", async (req, res, next) => {
   try {
     const did = parseInt(req.params.id, 10);
     const { rows } = await query(
-      `SELECT h.*, u.name AS changed_by_name
+      `SELECT h.*, u.display_name AS changed_by_name
          FROM dispute_status_history h
          JOIN users u ON u.id = h.changed_by
         WHERE h.dispute_id = $1

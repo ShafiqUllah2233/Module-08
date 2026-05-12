@@ -1,6 +1,8 @@
 // Express error formatter — keeps responses uniform.
 // Throw `httpError(status, message)` from a route to short-circuit cleanly.
 
+const multer = require("multer");
+
 class HttpError extends Error {
   constructor(status, message, details) {
     super(message);
@@ -21,6 +23,15 @@ function notFound(_req, res) {
 function errorHandler(err, _req, res, _next) {
   if (err instanceof HttpError) {
     return res.status(err.status).json({ error: err.message, details: err.details });
+  }
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ error: "Uploaded file exceeds the size limit." });
+    }
+    return res.status(400).json({ error: err.message || "Upload rejected." });
+  }
+  if (typeof err.message === "string" && err.message.startsWith("Unsupported file type")) {
+    return res.status(400).json({ error: err.message });
   }
   // Postgres errors carry a `code` like "23505" (unique violation), "23503" (FK), etc.
   if (err && err.code) {

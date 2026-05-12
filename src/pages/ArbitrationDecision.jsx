@@ -1,225 +1,185 @@
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { AlertTriangle, ArrowLeft } from "lucide-react";
 import IntegrationTag from "../components/IntegrationTag";
-import { ARBITRATION_OUTCOMES, getDisputeById } from "../data/mockData";
+import { apiFetch } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+import { ARBITRATION_OUTCOMES } from "../constants/dispute";
 
 export default function ArbitrationDecision() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const dispute = getDisputeById(id);
+  const { user } = useAuth();
 
-  const [outcome, setOutcome] = useState(ARBITRATION_OUTCOMES[0].id);
+  const [disputeLabel, setDisputeLabel] = useState("");
+  const [existing, setExisting] = useState(null);
+  const [outcome, setOutcome] = useState("favour_client");
   const [notes, setNotes] = useState("");
   const [triggerPayment, setTriggerPayment] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  if (!dispute) {
-    return (
-      <div className="text-center py-20 text-ink-500">
-        Dispute {id} not found.
-      </div>
-    );
+  useEffect(() => {
+    (async () => {
+      try {
+        const [d, dec] = await Promise.all([
+          apiFetch(`/api/disputes/${id}`),
+          apiFetch(`/api/disputes/${id}/arbitration`),
+        ]);
+        setDisputeLabel(d.display_id || `#${id}`);
+        setExisting(dec || null);
+        if (dec?.outcome) setOutcome(dec.outcome);
+      } catch (e) {
+        setError(e.message || "Load failed.");
+      }
+    })();
+  }, [id]);
+
+  if (!user?.is_admin) {
+    return <Navigate to="/disputes" replace />;
   }
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault();
-    // FR-DR-22..27: record decision and route to the resolution report screen.
-    navigate(`/admin/disputes/${dispute.id}/resolution?outcome=${outcome}`);
+    if (!notes.trim()) {
+      setError("Decision notes are required.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/api/disputes/${id}/arbitration`, {
+        method: "POST",
+        body: {
+          outcome,
+          decision_notes: notes.trim(),
+          payment_signal_sent: triggerPayment,
+        },
+      });
+      navigate(`/admin/disputes/${id}/resolution`);
+    } catch (err) {
+      setError(err.message || "Submission failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <div className="max-w-[1080px] mx-auto">
       <Link
-        to={`/admin/disputes/${dispute.id}/review`}
-        className="inline-flex items-center gap-1.5 text-[12px] text-ink-500 hover:text-ink-700"
+        to={`/admin/disputes/${id}/review`}
+        className="inline-flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-primary"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
-        Back to Review
+        Back to review
       </Link>
 
-      <h1 className="mt-2 text-[22px] font-extrabold text-ink-900">
-        Arbitration Decision
+      <h1 className="mt-2 text-[22px] font-extrabold text-primary font-headline">
+        Arbitration decision
       </h1>
-      <p className="text-[13px] text-ink-500 mt-1 mb-6">
-        Make a final, binding ruling on dispute D-1024.
+      <p className="text-[13px] text-slate-500 mt-1 mb-6">
+        Case {disputeLabel}. This records a binding ruling.
       </p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5">
-        {/* Form (red border) */}
-        <form
-          onSubmit={submit}
-          className="rounded-xl border border-rose-300 bg-white shadow-card overflow-hidden"
-        >
-          {/* Official ruling header */}
-          <div className="px-5 py-4 bg-rose-50/60 border-b border-rose-200">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-600" />
-              <h2 className="text-[15px] font-bold text-rose-600">
-                Official Ruling
-              </h2>
-            </div>
-            <p className="text-[12px] text-ink-500 mt-1">
-              This decision is final and will be recorded in the system audit
-              log.
-            </p>
-          </div>
+      {existing && (
+        <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 text-[13px] px-4 py-3">
+          A decision already exists:{" "}
+          <strong>{existing.outcome_label || existing.outcome}</strong>. You can still regenerate
+          the resolution report afterwards.
+          <IntegrationTag className="ml-2">Audit logged</IntegrationTag>
+        </div>
+      )}
 
-          <div className="p-5">
-            {/* 1. Outcome */}
-            <h3 className="text-[14px] font-bold text-ink-900">
-              1. Arbitration Outcome
-            </h3>
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {ARBITRATION_OUTCOMES.map((o) => {
-                const selected = outcome === o.id;
-                return (
-                  <label
-                    key={o.id}
-                    className={`flex items-start gap-3 px-4 py-3 rounded-lg border cursor-pointer transition-colors ${
-                      selected
-                        ? "border-mint-400 bg-mint-300/10"
-                        : "border-slate-200 hover:bg-lavender-50"
+      {error && (
+        <div className="mb-4 rounded-lg bg-red-50 border border-red-100 text-red-700 text-sm px-4 py-3">
+          {error}
+        </div>
+      )}
+
+      <form
+        onSubmit={submit}
+        className="rounded-xl border border-rose-200 bg-surface-container-lowest shadow-card overflow-hidden"
+      >
+        <div className="px-5 py-4 bg-rose-50/80 border-b border-rose-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            <h2 className="text-[15px] font-bold text-rose-700 font-headline">
+              Official ruling
+            </h2>
+          </div>
+          <p className="text-[12px] text-slate-600 mt-1">
+            Final outcomes are mirrored to escrow workflows (demo signal only).
+          </p>
+        </div>
+
+        <div className="p-5">
+          <h3 className="text-[14px] font-bold text-ink-900">1. Outcome</h3>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {ARBITRATION_OUTCOMES.map((o) => {
+              const selected = outcome === o.id;
+              return (
+                <label
+                  key={o.id}
+                  className={`flex items-start gap-3 px-4 py-3 rounded-lg border cursor-pointer ${
+                    selected
+                      ? "border-tertiary-fixed-dim bg-surface-container"
+                      : "border-slate-200 hover:bg-surface-container-low"
+                  }`}
+                >
+                  <span
+                    className={`mt-0.5 w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                      selected ? "border-primary" : "border-slate-300"
                     }`}
                   >
-                    <span
-                      className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                        selected ? "border-navy-900" : "border-slate-300"
-                      }`}
-                    >
-                      {selected && (
-                        <span className="w-2 h-2 rounded-full bg-navy-900" />
-                      )}
-                    </span>
-                    <input
-                      type="radio"
-                      className="sr-only"
-                      name="outcome"
-                      value={o.id}
-                      checked={selected}
-                      onChange={() => setOutcome(o.id)}
-                    />
-                    <div>
-                      <div className="text-[13px] font-semibold text-ink-900">
-                        {o.title}
-                      </div>
-                      <div className="text-[11px] text-ink-500 mt-0.5">
-                        {o.subtitle}
-                      </div>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-
-            {/* 2. Notes */}
-            <h3 className="mt-6 text-[14px] font-bold text-ink-900">
-              2. Decision Notes &amp; Reasoning
-            </h3>
-            <p className="text-[11px] text-ink-500 mt-1">
-              This reasoning will be visible to both parties in the final
-              resolution report.
-            </p>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={6}
-              placeholder="Enter the detailed rationale for this decision..."
-              className="mt-2 w-full px-3 py-2.5 rounded-lg bg-lavender-50 border border-transparent focus:border-mint-400 focus:bg-white outline-none text-[13px] resize-y"
-            />
-
-            {/* Payment signal */}
-            <div className="mt-5 flex items-start gap-3">
-              <button
-                type="button"
-                onClick={() => setTriggerPayment((v) => !v)}
-                className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                  triggerPayment
-                    ? "bg-navy-900 border-navy-900"
-                    : "border-slate-300"
-                }`}
-                aria-pressed={triggerPayment}
-                aria-label="Trigger payment signal"
-              >
-                {triggerPayment && (
-                  <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                )}
-              </button>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[13px] font-semibold text-ink-900">
-                    Trigger Payment Signal
+                    {selected && <span className="w-2 h-2 rounded-full bg-primary" />}
                   </span>
-                  <IntegrationTag>Links to G07 — Payment Gateway</IntegrationTag>
-                </div>
-                <p className="text-[11px] text-ink-500 mt-1 leading-relaxed">
-                  Automatically trigger the escrow release or refund based on
-                  the outcome selected above via the payment gateway API.
-                </p>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="mt-6 pt-5 border-t border-slate-100 flex items-center justify-between">
-              <Link
-                to={`/admin/disputes/${dispute.id}/review`}
-                className="px-5 py-2.5 rounded-lg border border-slate-200 bg-white text-[13px] font-medium text-ink-900 hover:bg-lavender-50"
-              >
-                Cancel
-              </Link>
-              <button
-                type="submit"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-navy-900 hover:bg-navy-800 text-white text-[13px] font-semibold"
-              >
-                Submit Decision
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </form>
-
-        {/* RIGHT column */}
-        <div className="space-y-5">
-          {/* Escrow Context (dark) */}
-          <div className="bg-navy-900 text-white rounded-xl p-5 shadow-card">
-            <div className="text-[13px] font-semibold text-mint-300">
-              Escrow Context
-            </div>
-            <div className="mt-3 text-[11px] text-white/60">
-              Amount in Escrow
-            </div>
-            <div className="text-[24px] font-extrabold text-white leading-tight">
-              ${dispute.payment.escrow.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-              })}
-            </div>
-            <div className="mt-3 text-[11px] text-white/60">Project</div>
-            <div className="text-[13px] font-semibold mt-0.5">
-              {dispute.project}
-            </div>
+                  <input
+                    type="radio"
+                    className="sr-only"
+                    checked={selected}
+                    onChange={() => setOutcome(o.id)}
+                  />
+                  <span className="text-[13px] text-ink-900">{o.label}</span>
+                </label>
+              );
+            })}
           </div>
 
-          {/* Parties */}
-          <section className="bg-white rounded-xl shadow-card p-5">
-            <h3 className="text-[14px] font-bold text-ink-900">Parties</h3>
-            <div className="mt-3">
-              <div className="text-[11px] text-ink-500">
-                {dispute.parties.complainant.role}
-              </div>
-              <div className="text-[14px] font-semibold text-ink-900">
-                {dispute.parties.complainant.name}
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-[11px] text-ink-500">
-                {dispute.parties.respondent.role}
-              </div>
-              <div className="text-[14px] font-semibold text-ink-900">
-                {dispute.parties.respondent.name}
-              </div>
-            </div>
-          </section>
+          <h3 className="text-[14px] font-bold text-ink-900 mt-8">2. Decision notes</h3>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={6}
+            className="mt-3 w-full rounded-lg border border-outline-variant/40 px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-tertiary-fixed-dim"
+            placeholder="Legal reasoning summarised…"
+          />
+
+          <label className="mt-6 flex items-center gap-2 text-[13px] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={triggerPayment}
+              onChange={(e) => setTriggerPayment(e.target.checked)}
+            />
+            Send payment / escrow signal to G07 downstream
+          </label>
+
+          <div className="mt-8 flex justify-end gap-3">
+            <Link
+              to={`/admin/disputes/${id}/review`}
+              className="px-5 py-2.5 rounded-lg border border-outline-variant/40 text-[13px] font-medium"
+            >
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              disabled={busy}
+              className="px-6 py-2.5 rounded-lg bg-primary text-on-primary font-semibold text-[13px] disabled:opacity-50"
+            >
+              {busy ? "Recording…" : "Record decision"}
+            </button>
+          </div>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

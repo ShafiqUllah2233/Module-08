@@ -2,7 +2,7 @@
 const express = require("express");
 const { pool, query } = require("../config/db");
 const { httpError } = require("../middleware/error");
-const { requireAdmin } = require("../middleware/ctxUser");
+const { requireAdmin } = require("../middleware/auth");
 const { logAudit } = require("../utils/audit");
 const { STATUS_VALUES, TYPE_VALUES } = require("../utils/labels");
 const {
@@ -20,14 +20,21 @@ const router = express.Router();
 // Joins parties, project, and the assigned admin in one round-trip.
 const DISPUTE_SELECT = `
   SELECT d.*,
-         p.project_title, p.contract_status, p.escrow_amount, p.payment_status,
-         c.name AS complainant_name, c.role AS complainant_role,
-         r.name AS respondent_name,  r.role AS respondent_role,
-         au.name AS assigned_admin_name, ap.role AS assigned_admin_role
+         p.title AS project_title,
+         p.status::text AS contract_status,
+         COALESCE(ea.total_amount, p.agreed_amount) AS escrow_amount,
+         COALESCE(ea.escrow_status::text, 'pending') AS payment_status,
+         c.display_name AS complainant_name,
+         c.role::text AS complainant_role,
+         r.display_name AS respondent_name,
+         r.role::text AS respondent_role,
+         au.display_name AS assigned_admin_name,
+         ap.role AS assigned_admin_role
     FROM disputes d
-    JOIN projects p          ON p.id  = d.project_id
-    JOIN users    c          ON c.id  = d.complainant_id
-    JOIN users    r          ON r.id  = d.respondent_id
+    JOIN projects p               ON p.id  = d.project_id
+    JOIN users    c               ON c.id  = d.complainant_id
+    JOIN users    r               ON r.id  = d.respondent_id
+    LEFT JOIN escrow_accounts ea ON ea.project_id = p.id
     LEFT JOIN admin_profiles ap ON ap.id = d.assigned_admin_id
     LEFT JOIN users          au ON au.id = ap.user_id
 `;
@@ -67,33 +74,45 @@ router.get("/", async (req, res, next) => {
     const params = [];
 
     if (req.query.status) {
+      if (!STATUS_VALUES.includes(req.query.status)) {
+        throw httpError(400, `status filter must be one of: ${STATUS_VALUES.join(", ")}`);
+      }
       params.push(req.query.status);
       where.push(`d.status = $${params.length}`);
     }
     if (req.query.type) {
+      if (!TYPE_VALUES.includes(req.query.type)) {
+        throw httpError(400, `type filter must be one of: ${TYPE_VALUES.join(", ")}`);
+      }
       params.push(req.query.type);
       where.push(`d.dispute_type = $${params.length}`);
     }
     if (req.query.assigned_admin_id === "null") {
       where.push("d.assigned_admin_id IS NULL");
     } else if (req.query.assigned_admin_id) {
-      params.push(req.query.assigned_admin_id);
+      const aid = parseInt(req.query.assigned_admin_id, 10);
+      if (!Number.isFinite(aid)) throw httpError(400, "assigned_admin_id must be an integer.");
+      params.push(aid);
       where.push(`d.assigned_admin_id = $${params.length}`);
     }
     if (req.query.complainant_id) {
-      params.push(req.query.complainant_id);
+      const qid = parseInt(req.query.complainant_id, 10);
+      if (!Number.isFinite(qid)) throw httpError(400, "complainant_id must be an integer.");
+      params.push(qid);
       where.push(`d.complainant_id = $${params.length}`);
     }
     if (req.query.respondent_id) {
-      params.push(req.query.respondent_id);
+      const rid = parseInt(req.query.respondent_id, 10);
+      if (!Number.isFinite(rid)) throw httpError(400, "respondent_id must be an integer.");
+      params.push(rid);
       where.push(`d.respondent_id = $${params.length}`);
     }
     if (req.query.q) {
       params.push(`%${req.query.q}%`);
       where.push(
-        `(p.project_title ILIKE $${params.length}
-          OR c.name ILIKE $${params.length}
-          OR r.name ILIKE $${params.length}
+        `(p.title ILIKE $${params.length}
+          OR c.display_name ILIKE $${params.length}
+          OR r.display_name ILIKE $${params.length}
           OR CAST(d.id AS TEXT) ILIKE $${params.length})`
       );
     }
@@ -122,23 +141,23 @@ router.get("/:id", async (req, res, next) => {
 
     const [ev, med, hist, dec, rep] = await Promise.all([
       query(
-        `SELECT e.*, u.name AS uploaded_by_name
-           FROM evidence e
+        `SELECT e.*, u.display_name AS uploaded_by_name
+           FROM dispute_evidence e
            JOIN users u ON u.id = e.uploaded_by
           WHERE e.dispute_id = $1
           ORDER BY e.uploaded_at`,
         [id]
       ),
       query(
-        `SELECT m.*, u.name AS author_name
-           FROM mediation_records m
+        `SELECT m.*, u.display_name AS author_name
+           FROM dispute_mediation_records m
            JOIN users u ON u.id = m.author_id
           WHERE m.dispute_id = $1
           ORDER BY m.submitted_at`,
         [id]
       ),
       query(
-        `SELECT h.*, u.name AS changed_by_name
+        `SELECT h.*, u.display_name AS changed_by_name
            FROM dispute_status_history h
            JOIN users u ON u.id = h.changed_by
           WHERE h.dispute_id = $1
@@ -146,14 +165,14 @@ router.get("/:id", async (req, res, next) => {
         [id]
       ),
       query(
-        `SELECT ad.*, au.name AS admin_name
-           FROM arbitration_decisions ad
+        `SELECT ad.*, au.display_name AS admin_name
+           FROM dispute_arbitration_decisions ad
            JOIN admin_profiles ap ON ap.id = ad.admin_id
            JOIN users          au ON au.id = ap.user_id
           WHERE ad.dispute_id = $1`,
         [id]
       ),
-      query(`SELECT * FROM resolution_reports WHERE dispute_id = $1`, [id]),
+      query(`SELECT * FROM dispute_resolution_reports WHERE dispute_id = $1`, [id]),
     ]);
 
     res.json(
@@ -184,27 +203,63 @@ router.post("/", async (req, res, next) => {
     if (!TYPE_VALUES.includes(dispute_type)) {
       throw httpError(400, `dispute_type must be one of: ${TYPE_VALUES.join(", ")}`);
     }
+    const desc = String(description).trim();
+    if (!desc.length) {
+      throw httpError(400, "description cannot be empty.");
+    }
+    if (desc.length > 20000) {
+      throw httpError(400, "description is too long (max 20000 characters).");
+    }
 
     await client.query("BEGIN");
 
-    // Resolve parties from the project unless explicitly overridden
     const proj = await client.query(
       "SELECT id, client_id, freelancer_id FROM projects WHERE id = $1",
       [project_id]
     );
     if (!proj.rows[0]) throw httpError(400, "Project not found.");
 
-    const complainantId =
-      req.body.complainant_id || req.ctxUser?.id || proj.rows[0].client_id;
-    const respondentId =
-      req.body.respondent_id ||
-      (complainantId === proj.rows[0].client_id
-        ? proj.rows[0].freelancer_id
-        : proj.rows[0].client_id);
+    const cid = proj.rows[0].client_id;
+    const fid = proj.rows[0].freelancer_id;
+    const bodyC = req.body.complainant_id;
+    const bodyR = req.body.respondent_id;
 
-    // Suspended/banned users can't file (per Module 1 contract)
+    let complainantId;
+    let respondentId;
+
+    if (bodyC == null && bodyR == null) {
+      const uid = req.ctxUser?.id;
+      if (uid === cid || uid === fid) {
+        complainantId = uid;
+        respondentId = uid === cid ? fid : cid;
+      } else {
+        complainantId = cid;
+        respondentId = fid;
+      }
+    } else if (bodyC != null && bodyR != null) {
+      complainantId = parseInt(bodyC, 10);
+      respondentId = parseInt(bodyR, 10);
+      if (!Number.isFinite(complainantId) || !Number.isFinite(respondentId)) {
+        throw httpError(400, "complainant_id and respondent_id must be valid integers.");
+      }
+      const set = new Set([complainantId, respondentId]);
+      if (set.size !== 2 || !set.has(cid) || !set.has(fid)) {
+        throw httpError(
+          400,
+          "complainant_id and respondent_id must exactly match this project's client and freelancer."
+        );
+      }
+    } else {
+      throw httpError(400, "Provide both complainant_id and respondent_id, or omit both.");
+    }
+
+    const isPrivileged = !!(req.ctxAdmin && req.ctxAdmin.is_active);
+    if (!isPrivileged && (!req.ctxUser || complainantId !== req.ctxUser.id)) {
+      throw httpError(403, "You may only file a dispute where you are the complainant.");
+    }
+
     const cu = await client.query(
-      "SELECT account_status FROM users WHERE id = $1",
+      "SELECT account_status::text AS account_status FROM users WHERE id = $1 AND deleted_at IS NULL",
       [complainantId]
     );
     if (!cu.rows[0]) throw httpError(400, "Complainant not found.");
@@ -212,11 +267,20 @@ router.post("/", async (req, res, next) => {
       throw httpError(403, "Suspended or banned users cannot file disputes.");
     }
 
+    const ru = await client.query(
+      "SELECT account_status::text AS account_status FROM users WHERE id = $1 AND deleted_at IS NULL",
+      [respondentId]
+    );
+    if (!ru.rows[0]) throw httpError(400, "Respondent not found.");
+    if (ru.rows[0].account_status !== "active") {
+      throw httpError(400, "Respondent account is not active.");
+    }
+
     const ins = await client.query(
       `INSERT INTO disputes (project_id, complainant_id, respondent_id, dispute_type, description, status)
        VALUES ($1, $2, $3, $4, $5, 'submitted')
        RETURNING id`,
-      [project_id, complainantId, respondentId, dispute_type, description]
+      [project_id, complainantId, respondentId, dispute_type, desc]
     );
     const newId = ins.rows[0].id;
 
@@ -224,6 +288,17 @@ router.post("/", async (req, res, next) => {
       `INSERT INTO dispute_status_history (dispute_id, old_status, new_status, changed_by)
        VALUES ($1, 'submitted', 'submitted', $2)`,
       [newId, complainantId]
+    );
+
+    await client.query(
+      `UPDATE escrow_accounts
+          SET escrow_status = 'frozen', updated_at = NOW()
+        WHERE project_id = $1 AND escrow_status IN ('pending', 'active', 'partial')`,
+      [project_id]
+    );
+    await client.query(
+      `UPDATE disputes SET escrow_freeze_triggered = TRUE WHERE id = $1`,
+      [newId]
     );
 
     await client.query("COMMIT");
@@ -305,6 +380,10 @@ router.patch("/:id/assign", requireAdmin, async (req, res, next) => {
         ? null
         : parseInt(req.body.admin_id, 10);
 
+    if (adminId !== null && !Number.isFinite(adminId)) {
+      throw httpError(400, "admin_id must be an integer or null.");
+    }
+
     if (adminId !== null) {
       const exists = await query(
         "SELECT id FROM admin_profiles WHERE id = $1 AND is_active = TRUE",
@@ -346,10 +425,18 @@ router.post("/:id/escalate", async (req, res, next) => {
     await client.query("BEGIN");
 
     const cur = await client.query(
-      "SELECT status FROM disputes WHERE id = $1 FOR UPDATE",
+      "SELECT status, complainant_id, respondent_id FROM disputes WHERE id = $1 FOR UPDATE",
       [id]
     );
     if (!cur.rows[0]) throw httpError(404, "Dispute not found.");
+    const uid = req.ctxUser?.id;
+    const adminOk = !!(req.ctxAdmin && req.ctxAdmin.is_active);
+    const partyOk =
+      uid === cur.rows[0].complainant_id || uid === cur.rows[0].respondent_id;
+    if (!adminOk && !partyOk) {
+      throw httpError(403, "Only dispute parties or active admins may escalate.");
+    }
+
     if (cur.rows[0].status === "resolution_completed") {
       throw httpError(400, "Dispute is already resolved.");
     }

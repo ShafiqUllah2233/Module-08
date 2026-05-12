@@ -10,9 +10,22 @@ const router = express.Router({ mergeParams: true });
 router.get("/", async (req, res, next) => {
   try {
     const did = parseInt(req.params.id, 10);
+    const meta = await query(
+      "SELECT complainant_id, respondent_id FROM disputes WHERE id = $1",
+      [did]
+    );
+    if (!meta.rows[0]) throw httpError(404, "Dispute not found.");
+    const uid = req.ctxUser?.id;
+    const adminOk = !!(req.ctxAdmin && req.ctxAdmin.is_active);
+    const partyOk =
+      uid === meta.rows[0].complainant_id || uid === meta.rows[0].respondent_id;
+    if (!adminOk && !partyOk) {
+      throw httpError(403, "Only dispute parties or active admins may view mediation.");
+    }
+
     const { rows } = await query(
-      `SELECT m.*, u.name AS author_name
-         FROM mediation_records m
+      `SELECT m.*, u.display_name AS author_name
+         FROM dispute_mediation_records m
          JOIN users u ON u.id = m.author_id
         WHERE m.dispute_id = $1
         ORDER BY m.submitted_at`,
@@ -32,14 +45,23 @@ router.post("/", async (req, res, next) => {
     if (!text) throw httpError(400, "Field 'statement' is required.");
 
     // Mediation can only happen while the dispute is in mediation
-    const d = await query("SELECT status FROM disputes WHERE id = $1", [did]);
+    const d = await query(
+      "SELECT status, complainant_id, respondent_id FROM disputes WHERE id = $1",
+      [did]
+    );
     if (!d.rows[0]) throw httpError(404, "Dispute not found.");
+    const uid = req.ctxUser?.id;
+    const adminOk = !!(req.ctxAdmin && req.ctxAdmin.is_active);
+    const partyOk = uid === d.rows[0].complainant_id || uid === d.rows[0].respondent_id;
+    if (!adminOk && !partyOk) {
+      throw httpError(403, "Only dispute parties or active admins may post mediation statements.");
+    }
     if (!["mediation", "under_review"].includes(d.rows[0].status)) {
       throw httpError(400, "Mediation is only allowed while dispute is in mediation.");
     }
 
     const ins = await query(
-      `INSERT INTO mediation_records (dispute_id, author_id, statement)
+      `INSERT INTO dispute_mediation_records (dispute_id, author_id, statement)
        VALUES ($1, $2, $3)
        RETURNING *`,
       [did, req.ctxUser.id, text]
@@ -59,8 +81,8 @@ router.post("/", async (req, res, next) => {
     }
 
     const enriched = await query(
-      `SELECT m.*, u.name AS author_name
-         FROM mediation_records m
+      `SELECT m.*, u.display_name AS author_name
+         FROM dispute_mediation_records m
          JOIN users u ON u.id = m.author_id
         WHERE m.id = $1`,
       [ins.rows[0].id]

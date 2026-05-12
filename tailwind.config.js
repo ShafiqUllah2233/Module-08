@@ -4,24 +4,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Header / dark navy
         navy: {
           900: "#0a1f3d",
           850: "#0d2545",
           800: "#10294e",
         },
-        // Page background (lavender wash)
         lavender: {
           50: "#eef0fa",
           100: "#e8ebf6",
         },
-        // Mint / teal accent
         mint: {
           300: "#7eebc0",
           400: "#5ee0b0",
           500: "#3ed29b",
         },
-        // Status palette (pill backgrounds & text)
         pill: {
           mediationBg: "#efe0ff",
           mediationFg: "#7c3aed",
@@ -45,6 +41,19 @@ export default {
           400: "#7d8597",
           300: "#aab1c0",
         },
+        // Nexus Pro (from Default/light.html)
+        primary: "#001736",
+        surface: "#f9f9ff",
+        "on-surface": "#111c2d",
+        "surface-container": "#e7eeff",
+        "surface-container-low": "#f0f3ff",
+        "surface-container-high": "#dee8ff",
+        "surface-container-lowest": "#ffffff",
+        "primary-container": "#002b5b",
+        "on-primary": "#ffffff",
+        "tertiary-fixed-dim": "#6bd8cb",
+        "tertiary-fixed": "#89f5e7",
+        "outline-variant": "#c4c6d0",
       },
       fontFamily: {
         sans: [
@@ -58,6 +67,13 @@ export default {
           "Arial",
           "sans-serif",
         ],
+        headline: [
+          "Manrope",
+          "Inter",
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif",
+        ],
       },
       boxShadow: {
         card: "0 1px 2px rgba(15, 30, 61, 0.04), 0 4px 12px rgba(15, 30, 61, 0.04)",
@@ -65,4 +81,4 @@ export default {
     },
   },
   plugins: [],
-}
+};

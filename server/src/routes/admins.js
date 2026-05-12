@@ -1,21 +1,34 @@
 // /api/admins — manage admin staff (FR-DR-32..35)
+const crypto = require("crypto");
 const express = require("express");
+const bcrypt = require("bcrypt");
 const { pool, query } = require("../config/db");
 const { httpError } = require("../middleware/error");
-const { requireAdmin } = require("../middleware/ctxUser");
+const { requireAdmin } = require("../middleware/auth");
 const { logAudit } = require("../utils/audit");
 const { serializeAdmin } = require("../utils/serializers");
+const { normalizeEmail, isValidEmail } = require("../utils/validators");
 
 const router = express.Router();
 
 const ADMIN_SELECT = `
   SELECT ap.id, ap.user_id, ap.role, ap.is_active, ap.created_at, ap.updated_at,
-         u.name, u.email
+         u.display_name AS name, u.email
     FROM admin_profiles ap
     JOIN users u ON u.id = ap.user_id
 `;
 
-router.get("/", async (_req, res, next) => {
+function generateInitialPassword(length = 16) {
+  const chars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.randomBytes(length);
+  let s = "";
+  for (let i = 0; i < length; i += 1) {
+    s += chars[bytes[i] % chars.length];
+  }
+  return s;
+}
+
+router.get("/", requireAdmin, async (_req, res, next) => {
   try {
     const { rows } = await query(ADMIN_SELECT + " ORDER BY ap.created_at");
     res.json(rows.map(serializeAdmin));
@@ -24,7 +37,7 @@ router.get("/", async (_req, res, next) => {
   }
 });
 
-router.get("/:id", async (req, res, next) => {
+router.get("/:id", requireAdmin, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { rows } = await query(ADMIN_SELECT + " WHERE ap.id = $1", [id]);
@@ -35,23 +48,50 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-// POST — create a new admin (super admin only in production; relaxed here)
-// Body: { name, email, role }   -- creates a user + admin_profile in one tx
+// POST — create a new admin (super admin only for super_admin role)
+// Body: { name, email, role?, password? } — if password omitted, a one-time password is returned once.
 router.post("/", requireAdmin, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { name, email, role } = req.body || {};
-    if (!name || !email) throw httpError(400, "name and email are required.");
+    const { name, email, role, password } = req.body || {};
+    if (!name || email == null || String(email).trim() === "") {
+      throw httpError(400, "name and email are required.");
+    }
+    const normalized = normalizeEmail(email);
+    if (!isValidEmail(normalized)) {
+      throw httpError(400, "A valid email address is required.");
+    }
     const adminRole = role || "dispute_moderator";
     if (!["dispute_moderator", "super_admin"].includes(adminRole)) {
       throw httpError(400, "role must be dispute_moderator or super_admin.");
     }
+    if (adminRole === "super_admin" && req.ctxAdmin.role !== "super_admin") {
+      throw httpError(403, "Only super admins may create super admin profiles.");
+    }
+
+    let plainPassword =
+      typeof password === "string" && password.length > 0 ? password : null;
+    let returnedOnce = false;
+    if (!plainPassword) {
+      plainPassword = generateInitialPassword();
+      returnedOnce = true;
+    } else if (plainPassword.length < 8) {
+      throw httpError(400, "password must be at least 8 characters when provided.");
+    }
+
+    const rounds = Math.min(14, Math.max(4, parseInt(process.env.BCRYPT_ROUNDS || "10", 10)));
+    const passwordHash = await bcrypt.hash(plainPassword, rounds);
+
+    const parts = String(name).trim().split(/\s+/);
+    const first_name = parts[0] || "Admin";
+    const last_name = parts.slice(1).join(" ") || "User";
 
     await client.query("BEGIN");
 
     const u = await client.query(
-      `INSERT INTO users (name, email, role) VALUES ($1, $2, 'admin') RETURNING id`,
-      [name, email]
+      `INSERT INTO users (first_name, last_name, email, password_hash, role, account_status)
+       VALUES ($1, $2, $3, $4, 'admin', 'active') RETURNING id`,
+      [first_name, last_name, normalized, passwordHash]
     );
     const ap = await client.query(
       `INSERT INTO admin_profiles (user_id, role, is_active)
@@ -70,9 +110,18 @@ router.post("/", requireAdmin, async (req, res, next) => {
     });
 
     const { rows } = await query(ADMIN_SELECT + " WHERE ap.id = $1", [ap.rows[0].id]);
-    res.status(201).json(serializeAdmin(rows[0]));
+    const body = serializeAdmin(rows[0]);
+    if (returnedOnce) {
+      body.initial_password = plainPassword;
+      body.initial_password_notice =
+        "This password is shown once. Store it securely; it cannot be retrieved later.";
+    }
+    res.status(201).json(body);
   } catch (err) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
+    if (err && err.code === "23505") {
+      return next(httpError(409, "That email is already registered."));
+    }
     next(err);
   } finally {
     client.release();
@@ -93,6 +142,9 @@ router.patch("/:id", requireAdmin, async (req, res, next) => {
 
     if (!["dispute_moderator", "super_admin"].includes(newRole)) {
       throw httpError(400, "role must be dispute_moderator or super_admin.");
+    }
+    if (newRole === "super_admin" && req.ctxAdmin.role !== "super_admin") {
+      throw httpError(403, "Only super admins may assign the super_admin role.");
     }
 
     await query(

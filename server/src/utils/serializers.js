@@ -6,6 +6,10 @@ const {
   ADMIN_ROLE_LABELS,
   dispDisputeId,
 } = require("./labels");
+const {
+  escrowStatusToPaymentStatus,
+  contractStatusToDisplay,
+} = require("./paymentLabels");
 
 function initials(name = "") {
   return name
@@ -18,12 +22,14 @@ function initials(name = "") {
 
 // Maps a row produced by the master dispute SELECT (see disputes.js)
 function serializeDispute(row, opts = {}) {
+  const paymentStatus = escrowStatusToPaymentStatus(row.payment_status);
+  const contractDisplay = contractStatusToDisplay(row.contract_status);
   const out = {
     id: row.id,
     display_id: dispDisputeId(row.id, row.created_at),
     project_id: row.project_id,
     project_title: row.project_title,
-    contract_status: row.contract_status,
+    contract_status: contractDisplay,
     dispute_type: row.dispute_type,
     dispute_type_label: TYPE_LABELS[row.dispute_type] || row.dispute_type,
     description: row.description,
@@ -62,7 +68,8 @@ function serializeDispute(row, opts = {}) {
       : null,
     payment: {
       escrow: row.escrow_amount != null ? Number(row.escrow_amount) : null,
-      status: row.payment_status,
+      status: paymentStatus,
+      contractStatus: contractDisplay,
     },
   };
 
@@ -84,6 +91,8 @@ function serializeEvidence(row) {
     file_size_kb: row.file_size_kb,
     file_path: row.file_path,
     is_visible_to_parties: row.is_visible_to_parties,
+    is_reviewed: !!row.is_reviewed,
+    reviewed_at: row.reviewed_at,
     uploaded_at: row.uploaded_at,
     uploaded_by: {
       id: row.uploaded_by,

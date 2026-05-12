@@ -2,12 +2,12 @@
 const express = require("express");
 const { query } = require("../config/db");
 const { httpError } = require("../middleware/error");
+const { requireAdmin } = require("../middleware/auth");
 
 const router = express.Router();
 
-// GET /api/users/me — derived from x-user-id (set by ctxUser middleware)
+// GET /api/users/me — caller from JWT (or dev header); mounted behind requireUser
 router.get("/me", async (req, res) => {
-  if (!req.ctxUser) return res.status(401).json({ error: "Unknown caller." });
   res.json({
     id: req.ctxUser.id,
     name: req.ctxUser.name,
@@ -19,16 +19,18 @@ router.get("/me", async (req, res) => {
   });
 });
 
-router.get("/", async (req, res, next) => {
+router.get("/", requireAdmin, async (req, res, next) => {
   try {
     const params = [];
-    let where = "";
+    const clauses = ["deleted_at IS NULL"];
     if (req.query.role) {
       params.push(req.query.role);
-      where = "WHERE role = $1";
+      clauses.push(`role = $${params.length}`);
     }
+    const where = "WHERE " + clauses.join(" AND ");
     const { rows } = await query(
-      `SELECT id, name, email, role, account_status FROM users ${where} ORDER BY id`,
+      `SELECT id, display_name AS name, email, role::text AS role, account_status::text AS account_status
+         FROM users ${where} ORDER BY id`,
       params
     );
     res.json(rows);
@@ -40,8 +42,13 @@ router.get("/", async (req, res, next) => {
 router.get("/:id", async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const privileged = !!(req.ctxAdmin && req.ctxAdmin.is_active);
+    if (!privileged && id !== req.ctxUser.id) {
+      return res.status(403).json({ error: "You may only view your own profile." });
+    }
     const { rows } = await query(
-      "SELECT id, name, email, role, account_status FROM users WHERE id = $1",
+      `SELECT id, display_name AS name, email, role::text AS role, account_status::text AS account_status
+         FROM users WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     );
     if (!rows[0]) throw httpError(404, "User not found.");
